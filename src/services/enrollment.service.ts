@@ -207,4 +207,62 @@ export class EnrollmentService {
 
     return { processedUsers, enrolledCount: enrolledOperations };
   }
+
+  /**
+   * Syncs the local user course progress with data retrieved from Teachable.
+   */
+  async syncCourseProgress(userId: string, courseId: number, progressData: any) {
+    if (!userId || !courseId || !progressData) return;
+
+    try {
+      const user = await models.users.findById(userId);
+      if (!user) return;
+
+      const courseIndex = (user.courses || []).findIndex(
+        (c) => Number(c.teachableCourseId) === Number(courseId)
+      );
+
+      if (courseIndex === -1) {
+        // Option: Auto-enroll if missing? For now, just ignore or log.
+        // But dashboard needs it. Let's assume enrollment exists or we create it.
+        // User requested robustness.
+        return;
+      }
+
+      // Calculate total and completed from the nested structure
+      let totalLectures = 0;
+      let completedLectures = 0;
+      const sections = progressData.course_progress?.lecture_sections || [];
+
+      for (const section of sections) {
+        const lectures = section.lectures || [];
+        totalLectures += lectures.length;
+        // Check for is_completed boolean
+        completedLectures += lectures.filter((l: any) => l.is_completed === true).length;
+      }
+
+      const percent = progressData.course_progress?.percent_complete;
+      // If completedLectures is 0 but percent > 0, we might prefer percent logic, 
+      // but keeping strict counts is better for "Continue Studying X/Y lectures".
+
+      // Update local data
+      const courseAccess = user.courses[courseIndex];
+      courseAccess.totalLectures = totalLectures;
+      courseAccess.completedLecturesCount = completedLectures;
+      courseAccess.lastAccessedAt = new Date(); // They just accessed it/sync occurred
+
+      if (percent === 100 || (totalLectures > 0 && completedLectures === totalLectures)) {
+        if (!courseAccess.completedAt) {
+          courseAccess.completedAt = new Date();
+        }
+      } else {
+        // Reset completedAt if for some reason it's not 100% (e.g. new content added)
+        courseAccess.completedAt = null;
+      }
+
+      await user.save();
+    } catch (err) {
+      console.error(`Failed to sync course progress for user ${userId} course ${courseId}`, err);
+    }
+  }
 }

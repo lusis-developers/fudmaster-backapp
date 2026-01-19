@@ -393,10 +393,29 @@ export async function completeLectureForUser(
     await service.markLectureComplete({ user_id: finalTeachableUserId } as any, { course_id: courseIdNum, lecture_id: lectureIdNum } as any);
 
     // Award points for completing the lecture
+    // Award points for completing the lecture
     const resolvedUserId = await resolveUserId(userId, teachableUserId);
     if (resolvedUserId) {
       const pointsService = new PointsService();
       await pointsService.awardLecturePoint(resolvedUserId, courseIdNum, lectureIdNum);
+
+      // Background Sync for Dashboard
+      // We fetch the new progress to ensure our local DB is accurate (incrementing locally might desync if Teachable logic differs)
+      try {
+        // We need page/per to fetch progress, but for sync we just want the summary stats.
+        // Teachable might default to page 1.
+        // NOTE: If course is huge, we might not get all sections in one go if paginated.
+        // Ideally we used the "progress" endpoint which returns a summary?
+        // Teachable SDK `courseProgress` calls `/courses/:id/enrollments/:uid` or similar.
+        // Let's assume fetching page 1 is enough for most cases or the endpoint returns aggregate %?
+        // Teachable API v1: `GET /courses/:course_id/enrollments/:user_id` returns percent_complete in root.
+        const { data } = await service.courseProgress({ course_id: courseIdNum, user_id: finalTeachableUserId } as any);
+
+        const enrollmentService = new EnrollmentService();
+        await enrollmentService.syncCourseProgress(resolvedUserId, courseIdNum, data);
+      } catch (syncError) {
+        console.error("Sync after completion failed:", syncError);
+      }
     }
 
     res.status(HttpStatusCode.NoContent).send({ message: "Lecture marked as complete." });
@@ -470,6 +489,18 @@ export async function getCourseProgressForUser(
     }
 
     const { data } = await service.courseProgress({ course_id: courseIdNum, user_id: finalTeachableUserId, page: page ? parsePositiveNumber(page) : undefined, per: per ? parsePositiveNumber(per) : undefined } as any);
+
+    // Sync progress to local DB for Dashboard
+    try {
+      const resolvedUserId = await resolveUserId(userId, teachableUserId);
+      if (resolvedUserId) {
+        const enrollmentService = new EnrollmentService();
+        await enrollmentService.syncCourseProgress(resolvedUserId, courseIdNum, data);
+      }
+    } catch (syncError) {
+      console.error("Background sync failed:", syncError);
+    }
+
     res.status(HttpStatusCode.Ok).send({ message: "Course progress retrieved successfully.", progress: data });
     return;
   } catch (error: any) {

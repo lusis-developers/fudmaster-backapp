@@ -85,8 +85,10 @@ export async function createUser(
       courses: user.courses,
       careers: user.careers,
       payments: user.payments,
+
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     res.status(HttpStatusCode.Created).send({ message: "User created successfully.", user: safeUser });
@@ -245,6 +247,7 @@ export async function getUserById(
       accountType: user.accountType || "free",
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     res.status(HttpStatusCode.Ok).send({ message: "User retrieved successfully.", user: safeUser });
@@ -298,7 +301,8 @@ export async function checkUserByEmail(
       teachableUserId: user.teachableUserId,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
-      accountType
+      accountType,
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     res.status(HttpStatusCode.Ok).send({ message: "User exists.", exists: true, user: safeUser });
@@ -363,6 +367,7 @@ export async function loginUser(
       payments: user.payments,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     // Auto-enroll founder if needed
@@ -431,7 +436,8 @@ export async function registerFromPayment(
       payments: user.payments,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
-      accountType: user.accountType || "free"
+      accountType: user.accountType || "free",
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     // Auto-enroll founder if needed
@@ -574,6 +580,7 @@ export async function updateUser(
       transactions: user.transactions,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+      onboardingCompleted: user.onboardingCompleted,
     };
 
     res.status(HttpStatusCode.Ok).send({ message: "User updated successfully.", user: safeUser });
@@ -987,5 +994,122 @@ export async function loginWithGoogle(
     console.error("Error logging in with Google", error);
     res.status(HttpStatusCode.InternalServerError).send({ message: "Internal server error." });
     return;
+  }
+}
+
+export async function submitOnboarding(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const { userId } = req.params as { userId: string };
+
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Invalid parameter. A valid userId is required." });
+      return;
+    }
+
+    const {
+      jobPosition,
+      businessName,
+      businessType,
+      businessTypeOther,
+      employeeCount,
+      numberOfLocations,
+      heardAboutUs,
+      heardAboutUsOther
+    } = req.body as {
+      jobPosition?: string;
+      businessName?: string;
+      businessType?: string;
+      businessTypeOther?: string;
+      employeeCount?: string;
+      numberOfLocations?: number;
+      heardAboutUs?: string;
+      heardAboutUsOther?: string;
+    };
+
+    if (!jobPosition) {
+      res.status(HttpStatusCode.BadRequest).send({ message: "Invalid payload. Job position is required." });
+      return;
+    }
+
+    const user = await models.users.findById(userId);
+    if (!user) {
+      res.status(HttpStatusCode.NotFound).send({ message: "User not found." });
+      return;
+    }
+
+    if (jobPosition) user.jobPosition = jobPosition.trim();
+    if (businessName) user.businessName = businessName.trim();
+
+    const allowedBusinessTypes = ["physical_restaurant", "dark_kitchen", "food_truck", "catering", "bakery", "cafe", "other"];
+    if (businessType) {
+      if (allowedBusinessTypes.includes(businessType)) {
+        user.businessType = businessType as any;
+        if (businessType === "other" && businessTypeOther) {
+          user.businessTypeOther = businessTypeOther.trim();
+        } else {
+          user.businessTypeOther = null;
+        }
+      }
+    }
+
+    const allowedEmployeeCounts = ["1-5", "6-10", "11-25", "26-50", "50+"];
+    if (employeeCount && allowedEmployeeCounts.includes(employeeCount)) {
+      user.employeeCount = employeeCount as any;
+    }
+
+    if (numberOfLocations !== undefined && numberOfLocations !== null) {
+      const n = Number(numberOfLocations);
+      if (!Number.isNaN(n) && n >= 0) {
+        user.numberOfLocations = n;
+      }
+    }
+
+    const allowedHeard = [
+      "social_media_ad",
+      "friend_colleague",
+      "search_engine",
+      "online_article_blog",
+      "youtube_video",
+      "podcast",
+      "event_webinar",
+      "email_campaign",
+      "teachable_marketplace",
+      "other",
+    ];
+    if (heardAboutUs && allowedHeard.includes(heardAboutUs)) {
+      user.heardAboutUs = heardAboutUs as any;
+      if (heardAboutUs === "other" && heardAboutUsOther) {
+        user.heardAboutUsOther = heardAboutUsOther.trim();
+      }
+    }
+
+    user.onboardingCompleted = true;
+    await user.save();
+
+    const safeUser = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      teachableUserId: user.teachableUserId,
+      onboardingCompleted: user.onboardingCompleted,
+      jobPosition: user.jobPosition,
+      businessName: user.businessName,
+      businessType: user.businessType,
+      employeeCount: user.employeeCount,
+      numberOfLocations: user.numberOfLocations,
+    };
+
+    res.status(HttpStatusCode.Ok).send({
+      message: "Onboarding completed successfully.",
+      user: safeUser
+    });
+
+  } catch (error) {
+    console.error("Error submitting onboarding", error);
+    res.status(HttpStatusCode.InternalServerError).send({ message: "Internal server error." });
   }
 }
