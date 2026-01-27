@@ -6,6 +6,7 @@ import gamificationRouter from "./gamification.router";
 import careersRouter from "./careers.router";
 import paymentRouter from "./payment.router";
 import dashboardRouter from "./dashboard.router";
+import ghlRouter from "./ghl.router";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -17,6 +18,7 @@ function routerApi(app: Application) {
   router.use("/careers", careersRouter);
   router.use("/payment", paymentRouter);
   router.use("/dashboard", dashboardRouter);
+  router.use("/ghl", ghlRouter);
 }
 
 export default routerApi;
